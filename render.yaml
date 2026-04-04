@@ -1,0 +1,21 @@
+databases:
+  - name: onevoice-db
+    plan: free
+    databaseName: onevoice
+    user: onevoice
+
+services:
+  - type: web
+    name: onevoice
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: onevoice-db
+          property: connectionString
+    healthCheckPath: /health

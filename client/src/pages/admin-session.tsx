@@ -174,7 +174,7 @@ export default function AdminSession() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-base font-bold text-foreground">{session.title}</h1>
-              <p className="text-xs text-muted-foreground">의장 관리 화면</p>
+              <p className="text-xs text-muted-foreground">Chair Dashboard / 의장 관리</p>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="gap-1">
@@ -192,7 +192,7 @@ export default function AdminSession() {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground mb-1">회원 접속 코드</p>
+                <p className="text-xs text-muted-foreground mb-1">Access Code / 접속 코드</p>
                 <p className="text-2xl font-mono font-bold tracking-[0.3em] text-primary" data-testid="text-access-code">
                   {session.accessCode}
                 </p>
@@ -203,7 +203,8 @@ export default function AdminSession() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mt-2">
-              이 코드를 회원들에게 공유하세요. Zoom 화면에 표시하면 편리합니다.
+              Share this code with participants. Display on your screen share.
+이 코드를 참가자에게 공유하세요.
             </p>
           </CardContent>
         </Card>
@@ -215,7 +216,7 @@ export default function AdminSession() {
           className="w-full justify-between"
           onClick={() => setShowParticipants(!showParticipants)}
         >
-          <span className="text-sm">참석 회원 ({participants.length}명)</span>
+          <span className="text-sm">Participants / 참석자 ({participants.length})</span>
           {showParticipants ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </Button>
         {showParticipants && (
@@ -234,9 +235,9 @@ export default function AdminSession() {
         {/* Agendas */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold">안건 목록</h2>
+            <h2 className="text-base font-semibold">Agenda / 안건</h2>
             <Button data-testid="button-add-agenda" variant="outline" size="sm" onClick={() => setShowAdd(!showAdd)}>
-              <Plus className="w-4 h-4 mr-1" /> 안건 추가
+              <Plus className="w-4 h-4 mr-1" /> Add / 추가
             </Button>
           </div>
 
@@ -290,17 +291,17 @@ export default function AdminSession() {
                           </span>
                           {isVoting && (
                             <Badge className="bg-primary text-primary-foreground text-xs animate-pulse">
-                              투표 진행 중
+                              Voting
                             </Badge>
                           )}
                           {isClosed && isPassed && (
                             <Badge className="bg-chart-1 text-white text-xs gap-1">
-                              <CircleCheckBig className="w-3 h-3" /> 가결
+                              <CircleCheckBig className="w-3 h-3" /> Passed
                             </Badge>
                           )}
                           {isClosed && !isPassed && agenda.result && (
                             <Badge variant="destructive" className="text-xs gap-1">
-                              <CircleX className="w-3 h-3" /> 부결
+                              <CircleX className="w-3 h-3" /> Rejected
                             </Badge>
                           )}
                         </div>
@@ -317,7 +318,7 @@ export default function AdminSession() {
                             size="sm"
                             onClick={() => startVoting(agenda.id)}
                           >
-                            <Play className="w-3.5 h-3.5 mr-1" /> 투표 시작
+                            <Play className="w-3.5 h-3.5 mr-1" /> Start Vote
                           </Button>
                         )}
                         {isVoting && (
@@ -327,7 +328,7 @@ export default function AdminSession() {
                             variant="destructive"
                             onClick={() => closeVoting(agenda.id)}
                           >
-                            <Square className="w-3.5 h-3.5 mr-1" /> 투표 종료
+                            <Square className="w-3.5 h-3.5 mr-1" /> Close Vote
                           </Button>
                         )}
                       </div>
@@ -337,14 +338,14 @@ export default function AdminSession() {
                     {(isVoting || isClosed) && (
                       <div className="space-y-2 pt-2 border-t">
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>투표 현황</span>
-                          <span>{counts.total} / {participants.length}명 투표</span>
+                          <span>Results / 현황</span>
+                          <span>{counts.total} / {participants.length} voted</span>
                         </div>
 
                         {/* Bar chart */}
                         <div className="space-y-1.5">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs w-8 text-right font-medium text-emerald-600 dark:text-emerald-400">찬성</span>
+                            <span className="text-xs w-10 text-right font-medium text-emerald-600 dark:text-emerald-400">Agree</span>
                             <div className="flex-1 h-6 bg-muted rounded-md overflow-hidden">
                               <div
                                 className="h-full bg-emerald-500 dark:bg-emerald-400 rounded-md transition-all duration-500 flex items-center justify-end px-2"
@@ -355,7 +356,7 @@ export default function AdminSession() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs w-8 text-right font-medium text-red-600 dark:text-red-400">반대</span>
+                            <span className="text-xs w-10 text-right font-medium text-red-600 dark:text-red-400">Against</span>
                             <div className="flex-1 h-6 bg-muted rounded-md overflow-hidden">
                               <div
                                 className="h-full bg-red-500 dark:bg-red-400 rounded-md transition-all duration-500 flex items-center justify-end px-2"
@@ -366,7 +367,7 @@ export default function AdminSession() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs w-8 text-right font-medium text-muted-foreground">보류</span>
+                            <span className="text-xs w-10 text-right font-medium text-muted-foreground">Abstain</span>
                             <div className="flex-1 h-6 bg-muted rounded-md overflow-hidden">
                               <div
                                 className="h-full bg-gray-400 dark:bg-gray-500 rounded-md transition-all duration-500 flex items-center justify-end px-2"
@@ -385,7 +386,7 @@ export default function AdminSession() {
                             className="h-1.5"
                           />
                           <p className="text-xs text-muted-foreground mt-1">
-                            투표율 {participants.length > 0 ? Math.round((counts.total / participants.length) * 100) : 0}%
+                            Turnout {participants.length > 0 ? Math.round((counts.total / participants.length) * 100) : 0}%
                           </p>
                         </div>
                       </div>
@@ -397,8 +398,8 @@ export default function AdminSession() {
 
           {agendas.length === 0 && (
             <div className="text-center py-12 text-muted-foreground">
-              <p className="text-sm">등록된 안건이 없습니다</p>
-              <p className="text-xs mt-1">"안건 추가" 버튼으로 안건을 등록하세요</p>
+              <p className="text-sm">No agenda items yet</p>
+              <p className="text-xs mt-1">Click "Add" to create agenda items</p>
             </div>
           )}
         </div>

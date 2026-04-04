@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "wouter";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { CircleCheckBig, CircleX, Minus, Clock } from "lucide-react";
 import { connectWs, onWsMessage } from "@/lib/ws";
 
@@ -87,7 +86,7 @@ export default function Vote() {
         setMyVotes((prev) => ({ ...prev, [currentVoting.agendaId]: choice }));
       } else {
         const data = await res.json();
-        if (data.error === "이미 투표하셨습니다") {
+        if (data.error === "Already voted") {
           setMyVotes((prev) => ({ ...prev, [currentVoting.agendaId]: choice }));
         }
       }
@@ -98,15 +97,21 @@ export default function Vote() {
 
   const hasVoted = currentVoting ? myVotes[currentVoting.agendaId] : undefined;
 
+  const voteLabels: Record<string, string> = {
+    agree: "Agree / 찬성",
+    disagree: "Disagree / 반대",
+    abstain: "Abstain / 보류",
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <div className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="px-4 py-3 text-center">
           <h1 className="text-sm font-bold text-foreground">
-            {session?.title || "로딩 중..."}
+            {session?.title || "Loading..."}
           </h1>
-          <p className="text-xs text-muted-foreground">한소리 투표</p>
+          <p className="text-xs text-muted-foreground">OneVoice</p>
         </div>
       </div>
 
@@ -118,9 +123,9 @@ export default function Vote() {
               <Clock className="w-8 h-8 text-muted-foreground" />
             </div>
             <div>
-              <p className="text-base font-medium text-foreground">대기 중</p>
+              <p className="text-base font-medium text-foreground">Waiting / 대기 중</p>
               <p className="text-sm text-muted-foreground mt-1">
-                의장이 투표를 시작하면<br />여기에 안건이 표시됩니다
+                The chair will start voting shortly<br />의장이 투표를 시작하면 여기에 표시됩니다
               </p>
             </div>
           </div>
@@ -141,25 +146,25 @@ export default function Vote() {
               )}
               <div>
                 <Badge className={lastResult.result === "passed" ? "bg-emerald-500 text-white" : "bg-red-500 text-white"}>
-                  {lastResult.result === "passed" ? "가결" : "부결"}
+                  {lastResult.result === "passed" ? "Passed / 가결" : "Rejected / 부결"}
                 </Badge>
                 <p className="text-sm font-medium mt-2">{lastResult.agendaTitle}</p>
               </div>
               <div className="flex justify-center gap-6 text-sm">
                 <div className="text-center">
                   <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{lastResult.agree}</p>
-                  <p className="text-xs text-muted-foreground">찬성</p>
+                  <p className="text-xs text-muted-foreground">Agree</p>
                 </div>
                 <div className="text-center">
                   <p className="text-lg font-bold text-red-600 dark:text-red-400">{lastResult.disagree}</p>
-                  <p className="text-xs text-muted-foreground">반대</p>
+                  <p className="text-xs text-muted-foreground">Disagree</p>
                 </div>
                 <div className="text-center">
                   <p className="text-lg font-bold text-muted-foreground">{lastResult.abstain}</p>
-                  <p className="text-xs text-muted-foreground">보류</p>
+                  <p className="text-xs text-muted-foreground">Abstain</p>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">다음 안건을 기다려 주세요</p>
+              <p className="text-xs text-muted-foreground">Waiting for next item... / 다음 안건을 기다려 주세요</p>
             </CardContent>
           </Card>
         )}
@@ -167,9 +172,8 @@ export default function Vote() {
         {/* Active voting */}
         {currentVoting && (
           <div className="w-full max-w-sm space-y-6">
-            {/* Agenda info */}
             <div className="text-center space-y-2">
-              <Badge className="bg-primary text-primary-foreground">투표 진행 중</Badge>
+              <Badge className="bg-primary text-primary-foreground">Vote Now / 투표 진행 중</Badge>
               <h2 className="text-base font-bold text-foreground">{currentVoting.agendaTitle}</h2>
               {currentVoting.agendaDescription && (
                 <p className="text-sm text-muted-foreground">{currentVoting.agendaDescription}</p>
@@ -177,19 +181,17 @@ export default function Vote() {
             </div>
 
             {hasVoted ? (
-              /* Already voted */
               <Card className="bg-primary/5 border-primary/20">
                 <CardContent className="pt-6 text-center space-y-3">
                   <CircleCheckBig className="w-12 h-12 mx-auto text-primary" />
-                  <p className="text-base font-semibold">투표 완료</p>
+                  <p className="text-base font-semibold">Vote Submitted / 투표 완료</p>
                   <Badge variant="secondary" className="text-sm">
-                    {hasVoted === "agree" ? "찬성" : hasVoted === "disagree" ? "반대" : "보류"}
+                    {voteLabels[hasVoted] || hasVoted}
                   </Badge>
-                  <p className="text-xs text-muted-foreground">의장이 투표를 종료하면 결과가 표시됩니다</p>
+                  <p className="text-xs text-muted-foreground">Waiting for results... / 결과 대기 중</p>
                 </CardContent>
               </Card>
             ) : (
-              /* Vote buttons */
               <div className="space-y-3">
                 <button
                   data-testid="button-agree"
@@ -198,7 +200,7 @@ export default function Vote() {
                   className="w-full h-20 rounded-xl bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white text-lg font-bold transition-all duration-200 animate-pulse-agree disabled:opacity-50 flex items-center justify-center gap-3 shadow-lg"
                 >
                   <CircleCheckBig className="w-7 h-7" />
-                  찬성
+                  Agree / 찬성
                 </button>
 
                 <button
@@ -208,7 +210,7 @@ export default function Vote() {
                   className="w-full h-20 rounded-xl bg-red-500 hover:bg-red-600 active:bg-red-700 text-white text-lg font-bold transition-all duration-200 animate-pulse-disagree disabled:opacity-50 flex items-center justify-center gap-3 shadow-lg"
                 >
                   <CircleX className="w-7 h-7" />
-                  반대
+                  Disagree / 반대
                 </button>
 
                 <button
@@ -218,11 +220,11 @@ export default function Vote() {
                   className="w-full h-14 rounded-xl bg-gray-400 hover:bg-gray-500 active:bg-gray-600 text-white text-base font-semibold transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   <Minus className="w-5 h-5" />
-                  보류
+                  Abstain / 보류
                 </button>
 
                 <p className="text-xs text-center text-muted-foreground">
-                  버튼을 누르면 즉시 투표됩니다
+                  Tap to vote instantly / 버튼을 누르면 즉시 투표됩니다
                 </p>
               </div>
             )}

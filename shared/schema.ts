@@ -1,39 +1,39 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, serial, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// 투표 세션 (총회 하나당 하나의 세션)
-export const sessions = sqliteTable("sessions", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title").notNull(), // e.g. "시냇물교실 선교회 설립총회"
-  accessCode: text("access_code").notNull().unique(), // 회원 접속용 코드
-  adminCode: text("admin_code").notNull(), // 의장용 관리 코드
+// 투표 세션
+export const sessions = pgTable("sessions", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  accessCode: text("access_code").notNull().unique(),
+  adminCode: text("admin_code").notNull(),
   status: text("status").notNull().default("waiting"), // waiting | active | ended
   createdAt: text("created_at").notNull(),
 });
 
 // 안건
-export const agendas = sqliteTable("agendas", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const agendas = pgTable("agendas", {
+  id: serial("id").primaryKey(),
   sessionId: integer("session_id").notNull(),
-  orderNum: integer("order_num").notNull(), // 안건 순서
-  title: text("title").notNull(), // e.g. "정관 승인의 건"
-  description: text("description"), // 안건 상세 설명
+  orderNum: integer("order_num").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
   status: text("status").notNull().default("pending"), // pending | voting | closed
-  result: text("result"), // passed | rejected | null
+  result: text("result"),
 });
 
-// 참가자 (회원)
-export const participants = sqliteTable("participants", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+// 참가자
+export const participants = pgTable("participants", {
+  id: serial("id").primaryKey(),
   sessionId: integer("session_id").notNull(),
   name: text("name").notNull(),
   joinedAt: text("joined_at").notNull(),
 });
 
 // 투표
-export const votes = sqliteTable("votes", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const votes = pgTable("votes", {
+  id: serial("id").primaryKey(),
   agendaId: integer("agenda_id").notNull(),
   participantId: integer("participant_id").notNull(),
   choice: text("choice").notNull(), // agree | disagree | abstain

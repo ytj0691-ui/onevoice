@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { storage } from "./storage";
+import { storage, initDb } from "./storage";
 
 // Track WebSocket connections by session
 const sessionClients = new Map<number, Set<WebSocket>>();
@@ -27,224 +27,279 @@ function generateCode(length: number): string {
 }
 
 export function registerRoutes(server: Server, app: Express) {
+  // Initialize DB tables
+  initDb().catch(console.error);
+
+  // Health check for Render
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
   // ============ SESSION ROUTES ============
 
-  // Create new session (의장이 총회 생성)
-  app.post("/api/sessions", (req, res) => {
-    const { title, agendas: agendaList } = req.body;
-    if (!title) return res.status(400).json({ error: "제목을 입력하세요" });
+  app.post("/api/sessions", async (req, res) => {
+    try {
+      const { title, agendas: agendaList } = req.body;
+      if (!title) return res.status(400).json({ error: "Title is required" });
 
-    const session = storage.createSession({
-      title,
-      accessCode: generateCode(6),
-      adminCode: generateCode(8),
-      status: "waiting",
-      createdAt: new Date().toISOString(),
-    });
-
-    // Create agendas if provided
-    if (agendaList && Array.isArray(agendaList)) {
-      agendaList.forEach((a: { title: string; description?: string }, i: number) => {
-        storage.createAgenda({
-          sessionId: session.id,
-          orderNum: i + 1,
-          title: a.title,
-          description: a.description || null,
-          status: "pending",
-          result: null,
-        });
+      const session = await storage.createSession({
+        title,
+        accessCode: generateCode(6),
+        adminCode: generateCode(8),
+        status: "waiting",
+        createdAt: new Date().toISOString(),
       });
+
+      if (agendaList && Array.isArray(agendaList)) {
+        for (let i = 0; i < agendaList.length; i++) {
+          const a = agendaList[i];
+          await storage.createAgenda({
+            sessionId: session.id,
+            orderNum: i + 1,
+            title: a.title,
+            description: a.description || null,
+            status: "pending",
+            result: null,
+          });
+        }
+      }
+
+      res.json(session);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
     }
-
-    res.json(session);
   });
 
-  // Get session by admin code
-  app.get("/api/sessions/admin/:code", (req, res) => {
-    const session = storage.getSessionByAdminCode(req.params.code);
-    if (!session) return res.status(404).json({ error: "세션을 찾을 수 없습니다" });
-    const agendaList = storage.getAgendasBySession(session.id);
-    const participantList = storage.getParticipantsBySession(session.id);
-    res.json({ session, agendas: agendaList, participants: participantList });
+  app.get("/api/sessions/admin/:code", async (req, res) => {
+    try {
+      const session = await storage.getSessionByAdminCode(req.params.code);
+      if (!session) return res.status(404).json({ error: "Session not found" });
+      const agendaList = await storage.getAgendasBySession(session.id);
+      const participantList = await storage.getParticipantsBySession(session.id);
+      res.json({ session, agendas: agendaList, participants: participantList });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
-  // Get session by access code (회원 입장)
-  app.get("/api/sessions/join/:code", (req, res) => {
-    const session = storage.getSessionByAccessCode(req.params.code);
-    if (!session) return res.status(404).json({ error: "잘못된 접속 코드입니다" });
-    res.json({ session });
+  app.get("/api/sessions/join/:code", async (req, res) => {
+    try {
+      const session = await storage.getSessionByAccessCode(req.params.code);
+      if (!session) return res.status(404).json({ error: "Invalid access code" });
+      res.json({ session });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // ============ AGENDA ROUTES ============
 
-  // Add agenda to session
-  app.post("/api/sessions/:sessionId/agendas", (req, res) => {
-    const sessionId = parseInt(req.params.sessionId);
-    const { title, description } = req.body;
-    if (!title) return res.status(400).json({ error: "안건 제목을 입력하세요" });
+  app.post("/api/sessions/:sessionId/agendas", async (req, res) => {
+    try {
+      const sessionId = parseInt(req.params.sessionId);
+      const { title, description } = req.body;
+      if (!title) return res.status(400).json({ error: "Title is required" });
 
-    const existing = storage.getAgendasBySession(sessionId);
-    const agenda = storage.createAgenda({
-      sessionId,
-      orderNum: existing.length + 1,
-      title,
-      description: description || null,
-      status: "pending",
-      result: null,
-    });
+      const existing = await storage.getAgendasBySession(sessionId);
+      const agenda = await storage.createAgenda({
+        sessionId,
+        orderNum: existing.length + 1,
+        title,
+        description: description || null,
+        status: "pending",
+        result: null,
+      });
 
-    broadcast(sessionId, { type: "agenda_added", agenda });
-    res.json(agenda);
-  });
-
-  // Start voting on an agenda
-  app.post("/api/agendas/:id/start", (req, res) => {
-    const agenda = storage.getAgenda(parseInt(req.params.id));
-    if (!agenda) return res.status(404).json({ error: "안건을 찾을 수 없습니다" });
-
-    // Close any currently voting agenda in the same session
-    const allAgendas = storage.getAgendasBySession(agenda.sessionId);
-    allAgendas.forEach((a) => {
-      if (a.status === "voting" && a.id !== agenda.id) {
-        storage.updateAgendaStatus(a.id, "closed");
-      }
-    });
-
-    storage.updateAgendaStatus(agenda.id, "voting");
-    const session = storage.getSession(agenda.sessionId);
-    if (session && session.status === "waiting") {
-      storage.updateSessionStatus(session.id, "active");
+      broadcast(sessionId, { type: "agenda_added", agenda });
+      res.json(agenda);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
     }
-
-    broadcast(agenda.sessionId, {
-      type: "voting_started",
-      agendaId: agenda.id,
-      agendaTitle: agenda.title,
-      agendaDescription: agenda.description,
-    });
-
-    res.json({ success: true });
   });
 
-  // Close voting on an agenda
-  app.post("/api/agendas/:id/close", (req, res) => {
-    const agenda = storage.getAgenda(parseInt(req.params.id));
-    if (!agenda) return res.status(404).json({ error: "안건을 찾을 수 없습니다" });
+  app.post("/api/agendas/:id/start", async (req, res) => {
+    try {
+      const agenda = await storage.getAgenda(parseInt(req.params.id));
+      if (!agenda) return res.status(404).json({ error: "Agenda not found" });
 
-    const allVotes = storage.getVotesByAgenda(agenda.id);
-    const agree = allVotes.filter((v) => v.choice === "agree").length;
-    const disagree = allVotes.filter((v) => v.choice === "disagree").length;
-    const abstain = allVotes.filter((v) => v.choice === "abstain").length;
+      const allAgendas = await storage.getAgendasBySession(agenda.sessionId);
+      for (const a of allAgendas) {
+        if (a.status === "voting" && a.id !== agenda.id) {
+          await storage.updateAgendaStatus(a.id, "closed");
+        }
+      }
 
-    // 출석 회원 과반수 찬성으로 의결 (정관 제13조 4항)
-    const total = allVotes.length;
-    const result = total > 0 && agree > total / 2 ? "passed" : "rejected";
+      await storage.updateAgendaStatus(agenda.id, "voting");
+      const session = await storage.getSession(agenda.sessionId);
+      if (session && session.status === "waiting") {
+        await storage.updateSessionStatus(session.id, "active");
+      }
 
-    storage.updateAgendaStatus(agenda.id, "closed", result);
+      broadcast(agenda.sessionId, {
+        type: "voting_started",
+        agendaId: agenda.id,
+        agendaTitle: agenda.title,
+        agendaDescription: agenda.description,
+      });
 
-    broadcast(agenda.sessionId, {
-      type: "voting_closed",
-      agendaId: agenda.id,
-      result,
-      agree,
-      disagree,
-      abstain,
-      total,
-    });
-
-    res.json({ result, agree, disagree, abstain, total });
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
-  // Get votes for an agenda
-  app.get("/api/agendas/:id/votes", (req, res) => {
-    const agendaId = parseInt(req.params.id);
-    const allVotes = storage.getVotesByAgenda(agendaId);
-    const agree = allVotes.filter((v) => v.choice === "agree").length;
-    const disagree = allVotes.filter((v) => v.choice === "disagree").length;
-    const abstain = allVotes.filter((v) => v.choice === "abstain").length;
-    res.json({ agree, disagree, abstain, total: allVotes.length, votes: allVotes });
+  app.post("/api/agendas/:id/close", async (req, res) => {
+    try {
+      const agenda = await storage.getAgenda(parseInt(req.params.id));
+      if (!agenda) return res.status(404).json({ error: "Agenda not found" });
+
+      const allVotes = await storage.getVotesByAgenda(agenda.id);
+      const agree = allVotes.filter((v) => v.choice === "agree").length;
+      const disagree = allVotes.filter((v) => v.choice === "disagree").length;
+      const abstain = allVotes.filter((v) => v.choice === "abstain").length;
+
+      const total = allVotes.length;
+      const result = total > 0 && agree > total / 2 ? "passed" : "rejected";
+
+      await storage.updateAgendaStatus(agenda.id, "closed", result);
+
+      broadcast(agenda.sessionId, {
+        type: "voting_closed",
+        agendaId: agenda.id,
+        result,
+        agree,
+        disagree,
+        abstain,
+        total,
+      });
+
+      res.json({ result, agree, disagree, abstain, total });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  app.get("/api/agendas/:id/votes", async (req, res) => {
+    try {
+      const agendaId = parseInt(req.params.id);
+      const allVotes = await storage.getVotesByAgenda(agendaId);
+      const agree = allVotes.filter((v) => v.choice === "agree").length;
+      const disagree = allVotes.filter((v) => v.choice === "disagree").length;
+      const abstain = allVotes.filter((v) => v.choice === "abstain").length;
+      res.json({ agree, disagree, abstain, total: allVotes.length, votes: allVotes });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // ============ PARTICIPANT ROUTES ============
 
-  // Join session as participant
-  app.post("/api/sessions/:code/join", (req, res) => {
-    const session = storage.getSessionByAccessCode(req.params.code);
-    if (!session) return res.status(404).json({ error: "잘못된 접속 코드입니다" });
+  app.post("/api/sessions/:code/join", async (req, res) => {
+    try {
+      const session = await storage.getSessionByAccessCode(req.params.code);
+      if (!session) return res.status(404).json({ error: "Invalid access code" });
 
-    const { name } = req.body;
-    if (!name) return res.status(400).json({ error: "이름을 입력하세요" });
+      const { name } = req.body;
+      if (!name) return res.status(400).json({ error: "Name is required" });
 
-    const participant = storage.createParticipant({
-      sessionId: session.id,
-      name,
-      joinedAt: new Date().toISOString(),
-    });
+      const participant = await storage.createParticipant({
+        sessionId: session.id,
+        name,
+        joinedAt: new Date().toISOString(),
+      });
 
-    broadcast(session.id, {
-      type: "participant_joined",
-      participant,
-      totalParticipants: storage.getParticipantsBySession(session.id).length,
-    });
+      const allParticipants = await storage.getParticipantsBySession(session.id);
+      broadcast(session.id, {
+        type: "participant_joined",
+        participant,
+        totalParticipants: allParticipants.length,
+      });
 
-    res.json({ participant, session });
+      res.json({ participant, session });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // ============ VOTE ROUTES ============
 
-  // Cast a vote
-  app.post("/api/vote", (req, res) => {
-    const { agendaId, participantId, choice } = req.body;
-    if (!agendaId || !participantId || !choice) {
-      return res.status(400).json({ error: "필수 정보가 누락되었습니다" });
+  app.post("/api/vote", async (req, res) => {
+    try {
+      const { agendaId, participantId, choice } = req.body;
+      if (!agendaId || !participantId || !choice) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+      if (!["agree", "disagree", "abstain"].includes(choice)) {
+        return res.status(400).json({ error: "Invalid choice" });
+      }
+
+      const agenda = await storage.getAgenda(agendaId);
+      if (!agenda || agenda.status !== "voting") {
+        return res.status(400).json({ error: "Not currently voting" });
+      }
+
+      const existing = await storage.getVoteByParticipantAndAgenda(participantId, agendaId);
+      if (existing) {
+        return res.status(400).json({ error: "Already voted" });
+      }
+
+      await storage.createVote({
+        agendaId,
+        participantId,
+        choice,
+        votedAt: new Date().toISOString(),
+      });
+
+      const allVotes = await storage.getVotesByAgenda(agendaId);
+      const agree = allVotes.filter((v) => v.choice === "agree").length;
+      const disagree = allVotes.filter((v) => v.choice === "disagree").length;
+      const abstain = allVotes.filter((v) => v.choice === "abstain").length;
+      const allParticipants = await storage.getParticipantsBySession(agenda.sessionId);
+
+      broadcast(agenda.sessionId, {
+        type: "vote_cast",
+        agendaId,
+        agree,
+        disagree,
+        abstain,
+        total: allVotes.length,
+        participantCount: allParticipants.length,
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
     }
-    if (!["agree", "disagree", "abstain"].includes(choice)) {
-      return res.status(400).json({ error: "올바른 선택이 아닙니다" });
-    }
-
-    const agenda = storage.getAgenda(agendaId);
-    if (!agenda || agenda.status !== "voting") {
-      return res.status(400).json({ error: "현재 투표 중인 안건이 아닙니다" });
-    }
-
-    // Check if already voted
-    const existing = storage.getVoteByParticipantAndAgenda(participantId, agendaId);
-    if (existing) {
-      return res.status(400).json({ error: "이미 투표하셨습니다" });
-    }
-
-    const vote = storage.createVote({
-      agendaId,
-      participantId,
-      choice,
-      votedAt: new Date().toISOString(),
-    });
-
-    // Broadcast updated counts
-    const allVotes = storage.getVotesByAgenda(agendaId);
-    const agree = allVotes.filter((v) => v.choice === "agree").length;
-    const disagree = allVotes.filter((v) => v.choice === "disagree").length;
-    const abstain = allVotes.filter((v) => v.choice === "abstain").length;
-    const participantCount = storage.getParticipantsBySession(agenda.sessionId).length;
-
-    broadcast(agenda.sessionId, {
-      type: "vote_cast",
-      agendaId,
-      agree,
-      disagree,
-      abstain,
-      total: allVotes.length,
-      participantCount,
-    });
-
-    res.json({ success: true });
   });
 
-  // ============ WEBSOCKET ============
+  // ============ WEBSOCKET with keepalive ============
 
   const wss = new WebSocketServer({ server, path: "/ws" });
 
-  wss.on("connection", (ws, req) => {
+  // Keepalive ping every 30s
+  const keepaliveInterval = setInterval(() => {
+    wss.clients.forEach((ws: any) => {
+      if (ws.isAlive === false) return ws.terminate();
+      ws.isAlive = false;
+      ws.ping();
+    });
+  }, 30000);
+
+  wss.on("close", () => clearInterval(keepaliveInterval));
+
+  wss.on("connection", (ws: any, req) => {
+    ws.isAlive = true;
+    ws.on("pong", () => { ws.isAlive = true; });
+
     const url = new URL(req.url || "", `http://${req.headers.host}`);
     const sessionId = parseInt(url.searchParams.get("sessionId") || "0");
 
@@ -256,15 +311,20 @@ export function registerRoutes(server: Server, app: Express) {
     }
 
     ws.on("close", () => {
-      if (sessionId) {
-        sessionClients.get(sessionId)?.delete(ws);
-      }
+      if (sessionId) sessionClients.get(sessionId)?.delete(ws);
     });
 
     ws.on("error", () => {
-      if (sessionId) {
-        sessionClients.get(sessionId)?.delete(ws);
-      }
+      if (sessionId) sessionClients.get(sessionId)?.delete(ws);
+    });
+  });
+
+  // Graceful shutdown for Render
+  process.on("SIGTERM", () => {
+    console.log("SIGTERM received, closing WebSocket server...");
+    clearInterval(keepaliveInterval);
+    wss.close(() => {
+      process.exit(0);
     });
   });
 }

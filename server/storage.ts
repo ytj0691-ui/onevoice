@@ -1,5 +1,5 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import { eq, and } from "drizzle-orm";
 import {
   sessions, agendas, participants, votes,
@@ -9,134 +9,145 @@ import {
   type Vote, type InsertVote,
 } from "@shared/schema";
 
-const sqlite = new Database("hansori.db");
-sqlite.pragma("journal_mode = WAL");
-export const db = drizzle(sqlite);
+// Support both DATABASE_URL (Render) and local SQLite fallback
+const connectionString = process.env.DATABASE_URL || "postgresql://localhost:5432/onevoice";
 
-// Create tables
-sqlite.exec(`
-  CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    access_code TEXT NOT NULL UNIQUE,
-    admin_code TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'waiting',
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS agendas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id INTEGER NOT NULL,
-    order_num INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT,
-    status TEXT NOT NULL DEFAULT 'pending',
-    result TEXT
-  );
-  CREATE TABLE IF NOT EXISTS participants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    joined_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS votes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    agenda_id INTEGER NOT NULL,
-    participant_id INTEGER NOT NULL,
-    choice TEXT NOT NULL,
-    voted_at TEXT NOT NULL
-  );
-`);
+const pool = new Pool({
+  connectionString,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+});
+
+export const db = drizzle(pool);
+
+// Create tables on startup
+export async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      access_code TEXT NOT NULL UNIQUE,
+      admin_code TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'waiting',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS agendas (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER NOT NULL,
+      order_num INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      result TEXT
+    );
+    CREATE TABLE IF NOT EXISTS participants (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      joined_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS votes (
+      id SERIAL PRIMARY KEY,
+      agenda_id INTEGER NOT NULL,
+      participant_id INTEGER NOT NULL,
+      choice TEXT NOT NULL,
+      voted_at TEXT NOT NULL
+    );
+  `);
+  console.log("Database tables initialized");
+}
 
 export interface IStorage {
-  // Sessions
-  createSession(data: InsertSession): Session;
-  getSession(id: number): Session | undefined;
-  getSessionByAccessCode(code: string): Session | undefined;
-  getSessionByAdminCode(code: string): Session | undefined;
-  updateSessionStatus(id: number, status: string): void;
-
-  // Agendas
-  createAgenda(data: InsertAgenda): Agenda;
-  getAgendasBySession(sessionId: number): Agenda[];
-  getAgenda(id: number): Agenda | undefined;
-  updateAgendaStatus(id: number, status: string, result?: string): void;
-
-  // Participants
-  createParticipant(data: InsertParticipant): Participant;
-  getParticipantsBySession(sessionId: number): Participant[];
-  getParticipant(id: number): Participant | undefined;
-
-  // Votes
-  createVote(data: InsertVote): Vote;
-  getVotesByAgenda(agendaId: number): Vote[];
-  getVoteByParticipantAndAgenda(participantId: number, agendaId: number): Vote | undefined;
+  createSession(data: InsertSession): Promise<Session>;
+  getSession(id: number): Promise<Session | undefined>;
+  getSessionByAccessCode(code: string): Promise<Session | undefined>;
+  getSessionByAdminCode(code: string): Promise<Session | undefined>;
+  updateSessionStatus(id: number, status: string): Promise<void>;
+  createAgenda(data: InsertAgenda): Promise<Agenda>;
+  getAgendasBySession(sessionId: number): Promise<Agenda[]>;
+  getAgenda(id: number): Promise<Agenda | undefined>;
+  updateAgendaStatus(id: number, status: string, result?: string): Promise<void>;
+  createParticipant(data: InsertParticipant): Promise<Participant>;
+  getParticipantsBySession(sessionId: number): Promise<Participant[]>;
+  getParticipant(id: number): Promise<Participant | undefined>;
+  createVote(data: InsertVote): Promise<Vote>;
+  getVotesByAgenda(agendaId: number): Promise<Vote[]>;
+  getVoteByParticipantAndAgenda(participantId: number, agendaId: number): Promise<Vote | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
-  createSession(data: InsertSession): Session {
-    return db.insert(sessions).values(data).returning().get();
+  async createSession(data: InsertSession): Promise<Session> {
+    const [row] = await db.insert(sessions).values(data).returning();
+    return row;
   }
 
-  getSession(id: number): Session | undefined {
-    return db.select().from(sessions).where(eq(sessions.id, id)).get();
+  async getSession(id: number): Promise<Session | undefined> {
+    const [row] = await db.select().from(sessions).where(eq(sessions.id, id));
+    return row;
   }
 
-  getSessionByAccessCode(code: string): Session | undefined {
-    return db.select().from(sessions).where(eq(sessions.accessCode, code)).get();
+  async getSessionByAccessCode(code: string): Promise<Session | undefined> {
+    const [row] = await db.select().from(sessions).where(eq(sessions.accessCode, code));
+    return row;
   }
 
-  getSessionByAdminCode(code: string): Session | undefined {
-    return db.select().from(sessions).where(eq(sessions.adminCode, code)).get();
+  async getSessionByAdminCode(code: string): Promise<Session | undefined> {
+    const [row] = await db.select().from(sessions).where(eq(sessions.adminCode, code));
+    return row;
   }
 
-  updateSessionStatus(id: number, status: string): void {
-    db.update(sessions).set({ status }).where(eq(sessions.id, id)).run();
+  async updateSessionStatus(id: number, status: string): Promise<void> {
+    await db.update(sessions).set({ status }).where(eq(sessions.id, id));
   }
 
-  createAgenda(data: InsertAgenda): Agenda {
-    return db.insert(agendas).values(data).returning().get();
+  async createAgenda(data: InsertAgenda): Promise<Agenda> {
+    const [row] = await db.insert(agendas).values(data).returning();
+    return row;
   }
 
-  getAgendasBySession(sessionId: number): Agenda[] {
-    return db.select().from(agendas).where(eq(agendas.sessionId, sessionId)).all();
+  async getAgendasBySession(sessionId: number): Promise<Agenda[]> {
+    return db.select().from(agendas).where(eq(agendas.sessionId, sessionId));
   }
 
-  getAgenda(id: number): Agenda | undefined {
-    return db.select().from(agendas).where(eq(agendas.id, id)).get();
+  async getAgenda(id: number): Promise<Agenda | undefined> {
+    const [row] = await db.select().from(agendas).where(eq(agendas.id, id));
+    return row;
   }
 
-  updateAgendaStatus(id: number, status: string, result?: string): void {
+  async updateAgendaStatus(id: number, status: string, result?: string): Promise<void> {
     if (result !== undefined) {
-      db.update(agendas).set({ status, result }).where(eq(agendas.id, id)).run();
+      await db.update(agendas).set({ status, result }).where(eq(agendas.id, id));
     } else {
-      db.update(agendas).set({ status }).where(eq(agendas.id, id)).run();
+      await db.update(agendas).set({ status }).where(eq(agendas.id, id));
     }
   }
 
-  createParticipant(data: InsertParticipant): Participant {
-    return db.insert(participants).values(data).returning().get();
+  async createParticipant(data: InsertParticipant): Promise<Participant> {
+    const [row] = await db.insert(participants).values(data).returning();
+    return row;
   }
 
-  getParticipantsBySession(sessionId: number): Participant[] {
-    return db.select().from(participants).where(eq(participants.sessionId, sessionId)).all();
+  async getParticipantsBySession(sessionId: number): Promise<Participant[]> {
+    return db.select().from(participants).where(eq(participants.sessionId, sessionId));
   }
 
-  getParticipant(id: number): Participant | undefined {
-    return db.select().from(participants).where(eq(participants.id, id)).get();
+  async getParticipant(id: number): Promise<Participant | undefined> {
+    const [row] = await db.select().from(participants).where(eq(participants.id, id));
+    return row;
   }
 
-  createVote(data: InsertVote): Vote {
-    return db.insert(votes).values(data).returning().get();
+  async createVote(data: InsertVote): Promise<Vote> {
+    const [row] = await db.insert(votes).values(data).returning();
+    return row;
   }
 
-  getVotesByAgenda(agendaId: number): Vote[] {
-    return db.select().from(votes).where(eq(votes.agendaId, agendaId)).all();
+  async getVotesByAgenda(agendaId: number): Promise<Vote[]> {
+    return db.select().from(votes).where(eq(votes.agendaId, agendaId));
   }
 
-  getVoteByParticipantAndAgenda(participantId: number, agendaId: number): Vote | undefined {
-    return db.select().from(votes)
-      .where(and(eq(votes.participantId, participantId), eq(votes.agendaId, agendaId)))
-      .get();
+  async getVoteByParticipantAndAgenda(participantId: number, agendaId: number): Promise<Vote | undefined> {
+    const [row] = await db.select().from(votes)
+      .where(and(eq(votes.participantId, participantId), eq(votes.agendaId, agendaId)));
+    return row;
   }
 }
 
