@@ -9,7 +9,6 @@ import {
   type Vote, type InsertVote,
 } from "@shared/schema";
 
-// Support both DATABASE_URL (Render) and local SQLite fallback
 const connectionString = process.env.DATABASE_URL || "postgresql://localhost:5432/onevoice";
 
 const pool = new Pool({
@@ -19,7 +18,6 @@ const pool = new Pool({
 
 export const db = drizzle(pool);
 
-// Create tables on startup
 export async function initDb() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -66,6 +64,7 @@ export interface IStorage {
   getAgendasBySession(sessionId: number): Promise<Agenda[]>;
   getAgenda(id: number): Promise<Agenda | undefined>;
   updateAgendaStatus(id: number, status: string, result?: string): Promise<void>;
+  deleteAgenda(id: number): Promise<void>;
   createParticipant(data: InsertParticipant): Promise<Participant>;
   getParticipantsBySession(sessionId: number): Promise<Participant[]>;
   getParticipant(id: number): Promise<Participant | undefined>;
@@ -119,6 +118,10 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.update(agendas).set({ status }).where(eq(agendas.id, id));
     }
+  }
+
+  async deleteAgenda(id: number): Promise<void> {
+    await db.delete(agendas).where(eq(agendas.id, id));
   }
 
   async createParticipant(data: InsertParticipant): Promise<Participant> {
