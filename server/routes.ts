@@ -3,7 +3,6 @@ import type { Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage, initDb } from "./storage";
 
-// Track WebSocket connections by session
 const sessionClients = new Map<number, Set<WebSocket>>();
 
 function broadcast(sessionId: number, message: object) {
@@ -27,10 +26,8 @@ function generateCode(length: number): string {
 }
 
 export function registerRoutes(server: Server, app: Express) {
-  // Initialize DB tables
   initDb().catch(console.error);
 
-  // Health check for Render
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
@@ -115,6 +112,24 @@ export function registerRoutes(server: Server, app: Express) {
 
       broadcast(sessionId, { type: "agenda_added", agenda });
       res.json(agenda);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // 안건 삭제 (pending 상태만 삭제 가능)
+  app.delete("/api/agendas/:id", async (req, res) => {
+    try {
+      const agendaId = parseInt(req.params.id);
+      const agenda = await storage.getAgenda(agendaId);
+      if (!agenda) return res.status(404).json({ error: "Agenda not found" });
+      if (agenda.status !== "pending") {
+        return res.status(400).json({ error: "Only pending agendas can be deleted" });
+      }
+      await storage.deleteAgenda(agendaId);
+      broadcast(agenda.sessionId, { type: "agenda_deleted", agendaId });
+      res.json({ success: true });
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: "Internal server error" });
@@ -281,11 +296,10 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
-  // ============ WEBSOCKET with keepalive ============
+  // ============ WEBSOCKET ============
 
   const wss = new WebSocketServer({ server, path: "/ws" });
 
-  // Keepalive ping every 30s
   const keepaliveInterval = setInterval(() => {
     wss.clients.forEach((ws: any) => {
       if (ws.isAlive === false) return ws.terminate();
@@ -308,23 +322,10 @@ export function registerRoutes(server: Server, app: Express) {
         sessionClients.set(sessionId, new Set());
       }
       sessionClients.get(sessionId)!.add(ws);
+
+      ws.on("close", () => {
+        sessionClients.get(sessionId)?.delete(ws);
+      });
     }
-
-    ws.on("close", () => {
-      if (sessionId) sessionClients.get(sessionId)?.delete(ws);
-    });
-
-    ws.on("error", () => {
-      if (sessionId) sessionClients.get(sessionId)?.delete(ws);
-    });
-  });
-
-  // Graceful shutdown for Render
-  process.on("SIGTERM", () => {
-    console.log("SIGTERM received, closing WebSocket server...");
-    clearInterval(keepaliveInterval);
-    wss.close(() => {
-      process.exit(0);
-    });
   });
 }
