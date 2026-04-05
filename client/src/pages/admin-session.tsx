@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import {
   Users, Play, Square, Plus, Copy, Check,
-  CircleCheckBig, CircleX, Minus, ChevronDown, ChevronUp,
+  CircleCheckBig, CircleX, Minus, ChevronDown, ChevronUp, Shield,
 } from "lucide-react";
 import { connectWs, onWsMessage } from "@/lib/ws";
 import { apiRequest } from "@/lib/queryClient";
@@ -38,6 +38,7 @@ export default function AdminSession() {
   const [voteCounts, setVoteCounts] = useState<Record<number, VoteCounts>>({});
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [copiedAdmin, setCopiedAdmin] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [showAdd, setShowAdd] = useState(false);
@@ -51,8 +52,6 @@ export default function AdminSession() {
       setSession(data.session);
       setAgendas(data.agendas);
       setParticipants(data.participants);
-
-      // Fetch vote counts for each agenda
       for (const a of data.agendas) {
         const vRes = await fetch(`/api/agendas/${a.id}/votes`);
         if (vRes.ok) {
@@ -148,6 +147,13 @@ export default function AdminSession() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  function copyAdminCode() {
+    if (!params.code) return;
+    navigator.clipboard.writeText(params.code).catch(() => {});
+    setCopiedAdmin(true);
+    setTimeout(() => setCopiedAdmin(false), 2000);
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -204,7 +210,32 @@ export default function AdminSession() {
             </div>
             <p className="text-xs text-muted-foreground mt-2">
               Share this code with participants. Display on your screen share.
-이 코드를 참가자에게 공유하세요.
+              이 코드를 참가자에게 공유하세요.
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Admin code panel */}
+        <Card className="bg-amber-500/5 border-amber-500/20">
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <Shield className="w-3.5 h-3.5 text-amber-600" />
+                  <p className="text-xs text-muted-foreground">Admin Code / 관리 코드 (의장 전용)</p>
+                </div>
+                <p className="text-xl font-mono font-bold tracking-[0.3em] text-amber-600">
+                  {params.code}
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={copyAdminCode}>
+                {copiedAdmin ? <Check className="w-4 h-4 mr-1" /> : <Copy className="w-4 h-4 mr-1" />}
+                {copiedAdmin ? "복사됨" : "복사"}
+              </Button>
+            </div>
+            <p className="text-xs text-amber-600/70 mt-2">
+              This code is for the chairperson only. Do NOT share with participants.
+              이 코드는 의장 전용입니다. 참가자에게 공유하지 마세요.
             </p>
           </CardContent>
         </Card>
@@ -273,7 +304,6 @@ export default function AdminSession() {
               const isVoting = agenda.status === "voting";
               const isClosed = agenda.status === "closed";
               const isPassed = agenda.result === "passed";
-
               return (
                 <Card
                   key={agenda.id}
@@ -310,7 +340,6 @@ export default function AdminSession() {
                           <p className="text-xs text-muted-foreground mt-1">{agenda.description}</p>
                         )}
                       </div>
-
                       <div className="shrink-0">
                         {agenda.status === "pending" && (
                           <Button
@@ -341,7 +370,6 @@ export default function AdminSession() {
                           <span>Results / 현황</span>
                           <span>{counts.total} / {participants.length} voted</span>
                         </div>
-
                         {/* Bar chart */}
                         <div className="space-y-1.5">
                           <div className="flex items-center gap-2">
@@ -378,7 +406,6 @@ export default function AdminSession() {
                             </div>
                           </div>
                         </div>
-
                         {/* Progress */}
                         <div className="pt-1">
                           <Progress
